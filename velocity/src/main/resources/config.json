@@ -1,0 +1,7 @@
+{
+    "start_directory": "/abc/server-folder",
+    "start_command": "screen -dm -S server ./server.sh",
+    "max_startup_time": 300,
+    "max_heartbeat_interval": 30,
+    "http_server_port": 9000
+}

@@ -1,0 +1,31 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '7.1.0'
+}
+
+repositories {
+    maven {
+        url 'https://repo.papermc.io/repository/maven-public/'
+    }
+    maven {
+        url 'https://repo.melluh.com/releases/'
+    }
+}
+
+dependencies {
+    compileOnly 'com.velocitypowered:velocity-api:3.1.1'
+    annotationProcessor 'com.velocitypowered:velocity-api:3.1.1'
+    implementation 'com.melluh:simple-http-server:1.0.0'
+    implementation 'com.grack:nanojson:1.7'
+}
+
+shadowJar {
+    archiveBaseName = 'server-hibernator-velocity'
+    archiveClassifier = ''
+    relocate 'com.melluh.simplehttpserver', 'com.melluh.serverhibernator.velocity.libs.simplehttpserver'
+    relocate 'com.grack.nanojson', 'com.melluh.serverhibernator.velocity.libs.nanojson'
+}
+
+build {
+    dependsOn shadowJar
+}

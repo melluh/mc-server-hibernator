@@ -1,0 +1,4 @@
+rootProject.name = 'server-hibernator'
+include 'velocity'
+include 'paper'
+

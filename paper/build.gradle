@@ -1,0 +1,25 @@
+plugins {
+    id 'java'
+    id 'net.minecrell.plugin-yml.bukkit' version '0.5.3'
+}
+
+repositories {
+    maven {
+        url 'https://repo.papermc.io/repository/maven-public/'
+    }
+}
+
+dependencies {
+    compileOnly 'io.papermc.paper:paper-api:1.19.4-R0.1-SNAPSHOT'
+}
+
+jar {
+    baseName 'server-hibernator-paper'
+}
+
+bukkit {
+    main = 'com.melluh.serverhibernator.paper.ServerHibernatorPaper'
+    name = 'ServerHibernator'
+    apiVersion = '1.19'
+    authors = ['Melluh']
+}
