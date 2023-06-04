@@ -14,8 +14,9 @@ public class Settings {
     private static final String FILE_NAME = "config.json";
 
     private String startDirectory, startCommand;
-    private long maxStartupTime, maxHeartbeatInterval;
+    private long maxStartupTime, maxHeartbeatInterval, crashCooldownTime;
     private int httpServerPort;
+    private String targetServerName, limboServerName;
 
     public boolean load(ServerHibernatorVelocity plugin, Path directory) {
         try {
@@ -36,7 +37,10 @@ public class Settings {
             this.startCommand = json.getString("start_command");
             this.maxStartupTime = json.getInt("max_startup_time") * 1000L;
             this.maxHeartbeatInterval = json.getInt("max_heartbeat_interval") * 1000L;
+            this.crashCooldownTime = json.getInt("crash_cooldown_time") * 1000L;
             this.httpServerPort = json.getInt("http_server_port");
+            this.targetServerName = json.getString("target_server_name");
+            this.limboServerName = json.getString("limbo_server_name");
 
             return true;
         } catch (IOException ex) {
@@ -64,8 +68,20 @@ public class Settings {
         return maxHeartbeatInterval;
     }
 
+    public long getCrashCooldownTime() {
+        return crashCooldownTime;
+    }
+
     public int getHttpServerPort() {
         return httpServerPort;
+    }
+
+    public String getTargetServerName() {
+        return targetServerName;
+    }
+
+    public String getLimboServerName() {
+        return limboServerName;
     }
 
 }

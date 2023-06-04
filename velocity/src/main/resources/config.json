@@ -3,5 +3,8 @@
     "start_command": "screen -dm -S server ./server.sh",
     "max_startup_time": 300,
     "max_heartbeat_interval": 30,
-    "http_server_port": 9000
+    "crash_cooldown_time": 20,
+    "http_server_port": 9000,
+    "target_server_name": "main",
+    "limbo_server_name": "limbo"
 }
