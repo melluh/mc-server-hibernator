@@ -22,4 +22,9 @@ bukkit {
     name = 'ServerHibernator'
     apiVersion = '1.19'
     authors = ['Melluh']
+    commands {
+        simulatecrash {
+            permission = 'serverhibernator.simulatecrash'
+        }
+    }
 }

@@ -6,25 +6,33 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitScheduler;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.util.Objects;
 import java.util.logging.Level;
 
 public class ServerHibernatorPaper extends JavaPlugin implements Listener {
 
     private final HttpClient httpServer = HttpClient.newHttpClient();
+
+    private boolean simulatedCrash = false;
+    private BukkitTask heartbeatTask;
     private long lastPlayerQuitTime;
 
     @Override
     public void onEnable() {
         if (!(new File(this.getDataFolder(), "config.yml")).exists())
             this.saveDefaultConfig();
+
+        Objects.requireNonNull(this.getCommand("simulatecrash")).setExecutor(new SimulateCrashCommand(this));
 
         int heartbeatInterval = this.getConfig().getInt("heartbeatInterval", 10);
 
@@ -36,9 +44,18 @@ public class ServerHibernatorPaper extends JavaPlugin implements Listener {
         this.getServer().getPluginManager().registerEvents(this, this);
     }
 
+    public void simulateCrash() {
+        this.simulatedCrash = true;
+        if (heartbeatTask != null) {
+            heartbeatTask.cancel();
+            heartbeatTask = null;
+        }
+    }
+
     @Override
     public void onDisable() {
-        this.callEndpoint("/shutdown");
+        if (!this.simulatedCrash)
+            this.callEndpoint("/shutdown");
     }
 
     private void checkEmptyTimeout() {
@@ -57,6 +74,8 @@ public class ServerHibernatorPaper extends JavaPlugin implements Listener {
             if (response.statusCode() != 200) {
                 this.getLogger().warning("Unexpected status code from proxy endpoint " + path + ": " + response.statusCode());
             }
+        } catch (ConnectException ex) {
+            this.getLogger().warning("Cannot connect to proxy HTTP server at " + this.getConfig().getString("host"));
         } catch (IOException | InterruptedException ex) {
             this.getLogger().log(Level.SEVERE, "Failed to call proxy endpoint " + path, ex);
         }
