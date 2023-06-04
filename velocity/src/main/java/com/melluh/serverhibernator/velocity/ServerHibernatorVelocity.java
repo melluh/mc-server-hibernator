@@ -2,7 +2,6 @@ package com.melluh.serverhibernator.velocity;
 
 import com.google.inject.Inject;
 import com.melluh.simplehttpserver.HttpServer;
-import com.melluh.simplehttpserver.Request;
 import com.melluh.simplehttpserver.protocol.Status;
 import com.melluh.simplehttpserver.response.Response;
 import com.melluh.simplehttpserver.router.Router;
@@ -36,7 +35,6 @@ public class ServerHibernatorVelocity {
 
     private ServerState serverState = ServerState.DOWN;
     private long serverStartTime, lastHeartbeatTime, serverCrashTime;
-    private boolean possibleIssues = false;
 
     @Inject
     public ServerHibernatorVelocity(ProxyServer server, Logger logger, @DataDirectory Path dataDirectory) {
@@ -52,30 +50,24 @@ public class ServerHibernatorVelocity {
         try {
             new HttpServer(settings.getHttpServerPort())
                     .use(new Router()
-                            .get("/heartbeat", this::handleHeartbeat)
-                            .get("/shutdown", this::handleShutdown))
+                            .get("/heartbeat", request -> {
+                                this.lastHeartbeatTime = System.currentTimeMillis();
+                                if (serverState != ServerState.UP) {
+                                    this.handleServerUp();
+                                }
+                                return new Response(Status.OK);
+                            })
+                            .get("/shutdown", request -> {
+                                logger.info("Paper server reported shutdown!");
+                                this.setServerState(ServerState.DOWN);
+                                return new Response(Status.OK);
+                            }))
                     .parseCookies(false)
                     .start();
             logger.info("HTTP server listening on port " + settings.getHttpServerPort());
         } catch (IOException ex) {
             logger.error("Failed to start HTTP server on port " + settings.getHttpServerPort(), ex);
         }
-    }
-
-    private Response handleHeartbeat(Request request) {
-        this.lastHeartbeatTime = System.currentTimeMillis();
-        if (serverState != ServerState.UP) {
-            this.handleServerUp();
-        }
-
-        return new Response(Status.OK);
-    }
-
-    private Response handleShutdown(Request request) {
-        logger.info("Paper server reported shutdown!");
-        this.setServerState(ServerState.DOWN);
-
-        return new Response(Status.OK);
     }
 
     private void startServer() {
@@ -94,8 +86,6 @@ public class ServerHibernatorVelocity {
 
     private void handleServerUp() {
         this.setServerState(ServerState.UP);
-        this.possibleIssues = false;
-
         if (limboServer != null && targetServer != null) {
             limboServer.getPlayersConnected().forEach(player -> {
                 player.sendMessage(Component.text("Server is ready! Redirecting you...").color(NamedTextColor.GREEN));
@@ -104,22 +94,12 @@ public class ServerHibernatorVelocity {
         }
     }
 
-    private void setServerState(ServerState serverState) {
-        logger.info("State changed! " + this.serverState + " -> " + serverState);
-        this.serverState = serverState;
-    }
-
     private void checkTimeout() {
         if (serverState == ServerState.STARTING) {
             if (System.currentTimeMillis() - serverStartTime > settings.getMaxStartupTime()) {
                 logger.info("Paper server did not come up within required timeframe");
-                this.possibleIssues = true;
                 this.setServerState(ServerState.LOCKOUT);
-
-                if (limboServer != null) {
-                    Collection<Player> waitingPlayers = limboServer.getPlayersConnected();
-                    waitingPlayers.forEach(player -> player.sendMessage(Component.text("The server did not come online within the expected timeframe! Please contact an admin to resolve this issue.").color(NamedTextColor.RED)));
-                }
+                this.notifyLimboPlayers(Component.text("The server did not come online within the expected timeframe! Please contact an admin to resolve this issue.").color(NamedTextColor.RED));
             }
         }
 
@@ -128,11 +108,7 @@ public class ServerHibernatorVelocity {
                 logger.info("Paper server timed out!");
                 this.setServerState(ServerState.CRASHED);
                 this.serverCrashTime = System.currentTimeMillis();
-
-                if (limboServer != null) {
-                    Collection<Player> waitingPlayers = limboServer.getPlayersConnected();
-                    waitingPlayers.forEach(player -> player.sendMessage(Component.text("It looks like the server crashed! Please wait, it will come back online in a moment.").color(NamedTextColor.RED)));
-                }
+                this.notifyLimboPlayers(Component.text("It looks like the server crashed! Please wait, it will come back online in a moment.").color(NamedTextColor.RED));
             }
         }
 
@@ -141,24 +117,21 @@ public class ServerHibernatorVelocity {
                 logger.info("Crash cooldown time elapsed");
                 this.setServerState(ServerState.DOWN);
 
-                if (limboServer != null) {
-                    Collection<Player> waitingPlayers = limboServer.getPlayersConnected();
-                    if (!waitingPlayers.isEmpty()) {
-                        this.startServer();
-                        waitingPlayers.forEach(player -> player.sendMessage(Component.text("The server is starting, please wait...").color(NamedTextColor.YELLOW)));
-                    }
+                boolean limboHasPlayers = this.notifyLimboPlayers(Component.text("The server is starting, please wait...").color(NamedTextColor.YELLOW));
+                if (limboHasPlayers) {
+                    this.startServer();
                 }
             }
         }
     }
 
+    private void setServerState(ServerState serverState) {
+        logger.info("State changed! " + this.serverState + " -> " + serverState);
+        this.serverState = serverState;
+    }
+
     @Subscribe
     public void onProxyInitialize(ProxyInitializeEvent event) {
-        server.getScheduler()
-                .buildTask(this, this::checkTimeout)
-                .repeat(Duration.ofSeconds(1))
-                .schedule();
-
         String targetServerName = settings.getTargetServerName();
         if (targetServerName != null && !targetServerName.isEmpty()) {
             this.targetServer = server.getServer(targetServerName)
@@ -170,68 +143,54 @@ public class ServerHibernatorVelocity {
             this.limboServer = server.getServer(limboServerName)
                     .orElseThrow(() -> new IllegalArgumentException("Limbo server '" + limboServerName + "' not defined"));
         }
+
+        server.getScheduler()
+                .buildTask(this, this::checkTimeout)
+                .repeat(Duration.ofSeconds(1))
+                .schedule();
     }
 
     @Subscribe
     public void onPlayerServerPreConnect(ServerPreConnectEvent event) {
+        // Only run on initial connection to the proxy
         if (event.getPreviousServer() != null)
-            return; // This is not the initial connection to the proxy
-
-        if (serverState == ServerState.STARTING) {
-            Component component = Component.text("The server is starting! Please wait...").color(NamedTextColor.YELLOW);
-            if (possibleIssues)
-                component = component.append(Component.text("\nThe server may be having issues. Contact an admin if you continue to be unable to join.").color(NamedTextColor.RED));
-
-            if (limboServer == null) {
-                event.getPlayer().disconnect(component);
-            } else {
-                event.getPlayer().sendMessage(component);
-                event.setResult(ServerResult.allowed(limboServer));
-            }
-
             return;
-        }
 
-        if (serverState == ServerState.DOWN) {
-            Component component = Component.text("Starting the server for you, please wait...").color(NamedTextColor.YELLOW);
-            if (possibleIssues)
-                component = component.append(Component.text("\nThe server may be having issues. Contact an admin if you continue to be unable to join.").color(NamedTextColor.RED));
-
-            if (limboServer == null) {
-                event.getPlayer().disconnect(component);
-            } else {
-                event.getPlayer().sendMessage(component);
-                event.setResult(ServerResult.allowed(limboServer));
+        switch (serverState) {
+            case DOWN -> {
+                this.disconnectOrSendToLimbo(event, Component.text("Starting the server for you, please wait...").color(NamedTextColor.YELLOW));
+                this.startServer();
             }
-
-            this.startServer();
-            return;
+            case STARTING -> this.disconnectOrSendToLimbo(event, Component.text("The server is starting! Please wait...").color(NamedTextColor.YELLOW));
+            case CRASHED -> this.disconnectOrSendToLimbo(event, Component.text("It looks like the server crashed! Please wait, it will come back online in a moment.").color(NamedTextColor.RED));
+            case LOCKOUT -> this.disconnectOrSendToLimbo(event, Component.text("The server is having issues! Please contact an admin for assistance.").color(NamedTextColor.RED));
         }
+    }
 
-        if (serverState == ServerState.CRASHED) {
-            Component component = Component.text("It looks like the server crashed! Please wait, it will come back online in a moment.").color(NamedTextColor.RED);
-            if (limboServer == null) {
-                event.getPlayer().disconnect(component);
-            } else {
-                event.getPlayer().sendMessage(component);
-                event.setResult(ServerResult.allowed(limboServer));
-            }
-            return;
+    private void disconnectOrSendToLimbo(ServerPreConnectEvent event, Component message) {
+        if (limboServer != null) {
+            event.getPlayer().sendMessage(message);
+            event.setResult(ServerResult.allowed(limboServer));
+        } else {
+            event.getPlayer().disconnect(message);
         }
+    }
 
-        if (serverState == ServerState.LOCKOUT) {
-            Component component = Component.text("The server is having issues! Please contact an admin for assistance.").color(NamedTextColor.RED);
-            if (limboServer == null) {
-                event.getPlayer().disconnect(component);
-            } else {
-                event.getPlayer().sendMessage(component);
-                event.setResult(ServerResult.allowed(limboServer));
-            }
+    private boolean notifyLimboPlayers(Component message) {
+        if (limboServer != null) {
+            Collection<Player> limboPlayers = limboServer.getPlayersConnected();
+            limboPlayers.forEach(player -> player.sendMessage(message));
+            return !limboPlayers.isEmpty();
         }
+        return false;
     }
 
     public Logger getLogger() {
         return logger;
+    }
+
+    public enum ServerState {
+        DOWN, STARTING, UP, CRASHED, LOCKOUT
     }
 
 }
